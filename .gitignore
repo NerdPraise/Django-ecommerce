@@ -11,3 +11,8 @@ media
 !.travis.yml
 /.env
 /.vscode
+
+# Virtual Env
+penv
+
+.gitignore

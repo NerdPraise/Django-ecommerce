@@ -1,0 +1,39 @@
+{% extends 'base.html'%}
+{% load crispy_forms_tags %}
+
+<body class="grey lighten-3">
+    {% block content%}
+
+
+    <!--Main layout-->
+    <main class="mt-5 pt-4">
+        <div class="container wow fadeIn">
+
+            <!-- Heading -->
+            <h2 class="my-5 h2 text-center">Payment</h2>
+            <div class="row">
+
+                <!--Grid column-->
+                <div class="col-md-12 mb-4">
+
+                    <!--Card-->
+                    <div class="card">
+                        <form class="card-body">
+                            {% csrf_token %}
+                            {{ form |crispy }}
+                            <button class="btn btn-primary" type="submit">Submit</button>
+                        </form>
+                    </div>
+                    <!--/.Card-->
+
+                </div>
+                <!--Grid column-->
+
+            </div>
+            <!--Grid row-->
+
+        </div>
+    </main>
+    <!--Main layout-->
+
+    {% endblock content %}
