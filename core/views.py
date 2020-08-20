@@ -3,8 +3,10 @@
 # Standard Library
 
 # Third parties
+import stripe
 
 # Django imports
+from django.conf import settings
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -14,10 +16,13 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 
 # Local imports
-from .models import BillingAddress, Item, OrderItem, Order
+from .models import BillingAddress, Item, OrderItem, Order, Payment
 from .forms import CheckoutForm
 
 # Try Else statements
+
+
+stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
 class CheckoutView(View):
@@ -31,7 +36,7 @@ class CheckoutView(View):
     def post(self, *args, **kwargs):
         form = CheckoutForm(self.request.POST or None)
         try:
-            order = Order.objects.get(user=request.user, ordered=False)
+            order = Order.objects.get(user=self.request.user, ordered=False)
             if form.is_valid():
                 street_address = form.cleaned_data['street_address']
                 apartment_address = form.cleaned_data['apartment_address']
@@ -51,26 +56,92 @@ class CheckoutView(View):
                 billing_address.save()
                 order.billing_address = billing_address
                 order.save()
-                print("valid")
-                print(form.cleaned_data)
+
                 # TODO: Add payment mode
+                if payment_options == "S":
+                    return redirect("core:payment", payment_option="stripe")
+                elif payment_options == "P":
+                    return redirect("core:payment", payment_option="paypal")
+                else:
+                    messages.error(self.request, "Invalid payment option")
+                    return redirect("core:checkout")
+            else:
+                # if form is not valid
+                print(form.errors)
+                messages.warning(self.request, form.errors)
                 return redirect("core:checkout-page")
-            print(form.errors)
-            messages.warning(self.request, form.errors)
-            return redirect("core:checkout-page")
         except ObjectDoesNotExist:
             messages.error(self.request, "You don't have an order")
             return redirect("core:order_summary")
 
 
-class PaymentView(View):
+class PaymentView(LoginRequiredMixin, View):
     def get(self, *args, **kwargs):
-        # Code block for GET request
-        return render(self.request, "payment.html")
+        payment_option = kwargs["payment_option"]
+        order = Order.objects.get(user=self.request.user, ordered=False)
+        context = {
+            "order": order,
+            "payment_option": payment_option
+        }
+        return render(self.request, "payment.html", context)
 
     def post(self, *args, **kwargs):
-        # Code block for POST request
-        pass
+        order = Order.objects.get(user=self.request.user, ordered=False)
+        token = self.request.POST.get("stripeToken")
+        amount = order.get_total() * 100
+
+        try:
+            # Use Stripe's library to make requests...
+            charge = stripe.Charge.create(
+                amount=int(amount),
+                currency="usd",
+                source=token,
+            )
+
+            # create payment
+            payment = Payment.objects.create(
+                user=self.request.user,
+                stripe_charge_id=charge["id"],
+                amount=amount
+            )
+            # Change order items ordered status
+            order_items = order.items.all()
+            order_items.update(ordered=True)
+            for item in order_items:
+                item.save()
+
+            # Assign payment to order
+            order.ordered = True
+            order.payment = payment
+            order.save()
+
+            messages.success(self.request, "Your Order was successful")
+
+        except stripe.error.CardError as e:
+            # Since it's a decline, stripe.error.CardError will be
+            messages.error(self.request, f"{e.error.message}")
+        except stripe.error.RateLimitError as e:
+            # Too many requests made to the API too quickly
+            messages.error(self.request, f"{e.error.message}")
+        except stripe.error.InvalidRequestError as e:
+            # Invalid parameters were supplied to Stripe's API
+            messages.error(self.request, f"{e.error.message}")
+        except stripe.error.AuthenticationError as e:
+            # Authentication with Stripe's API failed
+            # (maybe you changed API keys recently)
+            messages.error(self.request, f"{e.error.message}")
+        except stripe.error.APIConnectionError as e:
+            # Network communication with Stripe failed
+            messages.error(self.request, f"{e.error.message}")
+        except stripe.error.StripeError as e:
+            # Display a very generic error to the user, and maybe send
+            # yourself an email
+            messages.error(self.request, f"{e.error.message}")
+        except Exception as e:
+            # Something else happened, completely unrelated to Stripe
+            messages.error(self.request, f"{e.error.message}")
+        finally:
+            return redirect("/")
 
 
 class HomeView(ListView):
